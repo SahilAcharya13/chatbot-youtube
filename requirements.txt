@@ -1,7 +1,7 @@
 flask==3.0.3
 langchain
 pinecone-client
-langchain-pinecone>=0.1.0 
+langchain-pinecone==0.0.1 
 langchain-huggingface
 langchain-openai      
 python-dotenv
