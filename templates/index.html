@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TubeTalk - Chat with YouTube Videos</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <!-- MAIN APP CONTAINER -->
+    <div class="app-container">
+        
+        <!-- HEADER -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="ph-fill ph-youtube-logo color-primary"></i>
+                <span>TubeTalk</span>
+            </div>
+            <div class="status-indicator" id="status-indicator">
+                <div class="dot red"></div> No Video Selected
+            </div>
+        </header>
+
+        <!-- SETUP SCREEN (URL INPUT) -->
+        <main class="panel setup-panel" id="setup-panel">
+            <div class="panel-content">
+                <h1>Analyze any <span class="gradient-text">YouTube</span> Video</h1>
+                <p class="subtitle">Extract the transcript and use AI RAG to find answers.</p>
+                
+                <form id="video-form" class="input-group">
+                    <i class="ph ph-link"></i>
+                    <input type="url" id="video-url" placeholder="https://www.youtube.com/watch?v=..." required>
+                    <button type="submit" id="process-btn" class="btn-primary">
+                        <span>Process</span>
+                        <i class="ph ph-arrow-right"></i>
+                    </button>
+                </form>
+
+                <div class="loader-container" id="loader" style="display: none;">
+                    <div class="spinner"></div>
+                    <p id="loader-text">Extracting transcript and indexing data...</p>
+                </div>
+                
+                <p class="error-msg" id="setup-error"></p>
+            </div>
+        </main>
+
+        <!-- CHAT INTERFACE -->
+        <main class="panel chat-panel" id="chat-panel" style="display: none;">
+            <div class="chat-header">
+                <button class="btn-icon" id="btn-back" title="Change Video">
+                    <i class="ph ph-arrow-left"></i>
+                </button>
+                <div class="chat-title">
+                    <h2>Video Assistant</h2>
+                    <span class="video-badge" id="current-video-id">ID: </span>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message bot">
+                    <div class="avatar"><i class="ph-fill ph-robot"></i></div>
+                    <div class="bubble">
+                        I've analyzed the transcript and indexed the vector data. What would you like to know about this video?
+                    </div>
+                </div>
+            </div>
+
+            <form class="chat-input-area" id="chat-form">
+                <input type="text" id="chat-input" placeholder="Ask a question..." required>
+                <button type="submit" class="btn-primary btn-round">
+                    <i class="ph-fill ph-paper-plane-right"></i>
+                </button>
+            </form>
+        </main>
+    </div>
+
+    <!-- SCRIPT -->
+    <script>
+        const setupPanel = document.getElementById('setup-panel');
+        const chatPanel = document.getElementById('chat-panel');
+        const videoForm = document.getElementById('video-form');
+        const loader = document.getElementById('loader');
+        const setupError = document.getElementById('setup-error');
+        const statusIndicator = document.getElementById('status-indicator');
+        const currentVideoIdSpan = document.getElementById('current-video-id');
+        const btnBack = document.getElementById('btn-back');
+        
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const chatMessages = document.getElementById('chat-messages');
+
+        let activeVideoId = null;
+
+        // Check if server rendered an active video ID (session restoration)
+        '{% if active_video %}'
+            activeVideoId = '{{ active_video }}';
+            switchToChat(activeVideoId);
+        '{% endif %}'
+
+        videoForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('video-url').value;
+            
+            // UI state
+            videoForm.style.display = 'none';
+            loader.style.display = 'flex';
+            setupError.textContent = '';
+
+            try {
+                const res = await fetch('/process_video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_url: url })
+                });
+
+                const data = await res.json();
+
+                if(res.ok && data.success) {
+                    activeVideoId = data.video_id;
+                    switchToChat(activeVideoId);
+                } else {
+                    throw new Error(data.error || "Unknown error occurred.");
+                }
+            } catch(e) {
+                setupError.textContent = e.message;
+                videoForm.style.display = 'flex';
+            } finally {
+                loader.style.display = 'none';
+            }
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const msg = chatInput.value.trim();
+            if(!msg) return;
+
+            addMessage(msg, 'user');
+            chatInput.value = '';
+            
+            // Add loading pill
+            const loadingId = addLoading();
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, video_id: activeVideoId })
+                });
+
+                const data = await res.json();
+                removeLoading(loadingId);
+
+                if(res.ok && data.success) {
+                    addMessage(data.answer, 'bot');
+                } else {
+                    addMessage("Error: " + (data.error || "Could not reach server"), 'bot', true);
+                }
+            } catch(e) {
+                removeLoading(loadingId);
+                addMessage("Warning: Connection failed.", 'bot', true);
+            }
+        });
+
+        btnBack.addEventListener('click', () => {
+            chatPanel.style.display = 'none';
+            setupPanel.style.display = 'flex';
+            videoForm.style.display = 'flex';
+            updateStatus(false);
+            
+            // Optional: call a logout/clear session endpoint here
+        });
+
+        function switchToChat(videoId) {
+            setupPanel.style.display = 'none';
+            chatPanel.style.display = 'flex';
+            currentVideoIdSpan.textContent = `ID: ${videoId}`;
+            updateStatus(true);
+        }
+
+        function updateStatus(isActive) {
+            if(isActive) {
+                statusIndicator.innerHTML = '<div class="dot green"></div> Connected';
+            } else {
+                statusIndicator.innerHTML = '<div class="dot red"></div> No Video Selected';
+            }
+        }
+
+        function addMessage(text, sender, isError = false) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender} ${isError ? 'error' : ''}`;
+            
+            let iconCode = sender === 'bot' ? '<div class="avatar"><i class="ph-fill ph-robot"></i></div>' : '';
+            
+            msgDiv.innerHTML = `
+                ${iconCode}
+                <div class="bubble">${escapeHTML(text)}</div>
+            `;
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addLoading() {
+            const id = 'loader-' + Date.now();
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message bot`;
+            msgDiv.id = id;
+            msgDiv.innerHTML = `
+                <div class="avatar"><i class="ph-fill ph-robot"></i></div>
+                <div class="bubble typing">
+                    <span></span><span></span><span></span>
+                </div>
+            `;
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return id;
+        }
+
+        function removeLoading(id) {
+            const el = document.getElementById(id);
+            if(el) el.remove();
+        }
+
+        function escapeHTML(str) {
+            // Very simple escape
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>

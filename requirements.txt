@@ -1,0 +1,11 @@
+flask
+pinecone-client      
+langchain-pinecone   
+langchain-huggingface
+langchain-openai      
+python-dotenv
+openai
+youtube-transcript-api
+yt-dlp
+openai-whisper
+gunicorn
